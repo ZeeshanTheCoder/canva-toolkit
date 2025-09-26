@@ -1,103 +1,304 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Sidebar from "@/components/Sidebar";
+import FabricCanvas from "@/components/FabricCanvas";
+import { useRef, useState, useCallback } from "react"; // ✅ useEffect hata diya
+
+const Home = () => {
+  const canvasWrapperRef = useRef(null);
+  const [zoomLevel, setZoomLevel] = useState(0.6);
+
+  // === Existing functions: addTextToCanvas, addImageToCanvas, addShapeToCanvas ===
+  const addTextToCanvas = () => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const { canvas, fabric } = wrapper;
+    const text = new fabric.Textbox("Your Text", {
+      left: 100,
+      top: 100,
+      fontSize: 24,
+      fill: "#000",
+    });
+    canvas.add(text);
+    canvas.setActiveObject(text);
+  };
+
+  const addImageToCanvas = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const wrapper = canvasWrapperRef.current;
+      if (!wrapper || typeof wrapper.addImage !== "function") {
+        setTimeout(() => addImageToCanvas(file), 100);
+        return;
+      }
+      wrapper.addImage(e.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const addShapeToCanvas = (type) => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const { canvas, fabric } = wrapper;
+    let shape;
+    switch (type) {
+      case "rect":
+        shape = new fabric.Rect({
+          left: 100,
+          top: 100,
+          fill: "#4A90E2",
+          width: 80,
+          height: 60,
+        });
+        break;
+      case "circle":
+        shape = new fabric.Circle({
+          left: 140,
+          top: 100,
+          fill: "#7ED321",
+          radius: 40,
+        });
+        break;
+      case "triangle":
+        shape = new fabric.Triangle({
+          left: 100,
+          top: 100,
+          fill: "#D0021B",
+          width: 80,
+          height: 100,
+        });
+        break;
+      default:
+        return;
+    }
+    canvas.add(shape);
+    canvas.setActiveObject(shape);
+  };
+
+  // New: Download
+  const downloadPNG = () => {
+    canvasWrapperRef.current?.downloadPNG();
+  };
+
+  // New: Undo/Redo
+  const undo = () => canvasWrapperRef.current?.undo();
+  const redo = () => canvasWrapperRef.current?.redo();
+
+  // Zoom
+  const zoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.1, 1.5));
+  const zoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.1, 0.5));
+  const resetZoom = () => setZoomLevel(1);
+
+  const [bgColor, setBgColor] = useState("#ffffff");
+
+  const updateTextStyle = (style) => {
+    canvasWrapperRef.current?.updateTextStyle(style);
+  };
+
+  const changeBackgroundColor = (color) => {
+    setBgColor(color);
+    canvasWrapperRef.current?.setBackgroundColor(color);
+  };
+
+  const toggleBold = () =>
+    canvasWrapperRef.current?.toggleTextStyle("fontWeight");
+  const toggleItalic = () =>
+    canvasWrapperRef.current?.toggleTextStyle("fontStyle");
+  const toggleUnderline = () =>
+    canvasWrapperRef.current?.toggleTextStyle("underline");
+
+  const changeTextColor = (color) => {
+    canvasWrapperRef.current?.updateTextStyle({ fill: color });
+  };
+
+  const changeFontSize = (size) => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+
+    const active = wrapper.canvas?.getActiveObject();
+    if (!active || active.type !== "textbox") {
+      // Optional: show message
+      console.warn("Please select a text box to change font size");
+      return;
+    }
+
+    wrapper.updateTextStyle({ fontSize: parseInt(size) });
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-200">
+      {/* Top Toolbar */}
+      <div className="bg-white p-2 flex flex-wrap gap-2 border-b">
+        {/* Undo/Redo */}
+        <button
+          onClick={undo}
+          className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+        >
+          Undo
+        </button>
+        <button
+          onClick={redo}
+          className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+        >
+          Redo
+        </button>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+        <div className="border-l mx-2"></div>
+
+        {/* Text Toggles */}
+        <button
+          onClick={toggleBold}
+          className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-xs font-bold"
+        >
+          B
+        </button>
+        <button
+          onClick={toggleItalic}
+          className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-xs italic"
+        >
+          I
+        </button>
+        <button
+          onClick={toggleUnderline}
+          className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-xs underline"
+        >
+          U
+        </button>
+
+        {/* Font Size with editable input */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs">Size:</span>
+          <input
+            type="number"
+            min="8"
+            max="100"
+            defaultValue="24"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const value = parseInt(e.currentTarget.value, 10);
+                if (!isNaN(value)) {
+                  const clamped = Math.min(Math.max(value, 8), 100);
+                  changeFontSize(clamped); // ✅ Now safe
+                  e.currentTarget.value = clamped;
+                }
+                e.currentTarget.blur();
+              }
+            }}
+            className="w-16 p-1 border rounded text-xs"
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+
+        {/* Text Color */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs">Color:</span>
+          <div className="flex gap-1">
+            {[
+              "#000000",
+              "#FF0000",
+              "#00FF00",
+              "#0000FF",
+              "#FFFF00",
+              "#FF00FF",
+            ].map((color) => (
+              <button
+                key={color}
+                onClick={() => changeTextColor(color)}
+                className="w-5 h-5 rounded-full border border-gray-300"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+          <input
+            type="color"
+            onChange={(e) => changeTextColor(e.target.value)}
+            className="w-6 h-6 cursor-pointer rounded-full border border-gray-300"
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+        </div>
+
+        {/* Background Color (same as before) */}
+        <div className="border-l mx-2"></div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs self-center">BG:</span>
+          <div className="flex gap-1">
+            {[
+              "#ffffff",
+              "#f0f0f0",
+              "#e0e0e0",
+              "#000000",
+              "#ffcccc",
+              "#ccffcc",
+            ].map((color) => (
+              <button
+                key={color}
+                onClick={() => changeBackgroundColor(color)}
+                className="w-5 h-5 rounded-full border border-gray-300"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+          <input
+            type="color"
+            value={bgColor}
+            onChange={(e) => changeBackgroundColor(e.target.value)}
+            className="w-6 h-6 cursor-pointer rounded-full border border-gray-300"
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+        </div>
+
+        <div className="border-l mx-2"></div>
+        <button
+          onClick={downloadPNG}
+          className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
         >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          Download PNG
+        </button>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          onAddText={addTextToCanvas}
+          onAddImage={addImageToCanvas}
+          onAddShape={addShapeToCanvas}
+        />
+        <div className="flex-1 bg-gray-100 p-4 flex items-center justify-center relative">
+          {/* Zoom controls */}
+          <div className="absolute top-4 right-4 z-10 flex gap-2">
+            <button
+              onClick={zoomOut}
+              className="bg-gray-800 text-white p-2 rounded text-lg"
+            >
+              −
+            </button>
+            <button
+              onClick={resetZoom}
+              className="bg-gray-700 text-white p-2 rounded"
+            >
+              {Math.round(zoomLevel * 100)}%
+            </button>
+            <button
+              onClick={zoomIn}
+              className="bg-gray-800 text-white p-2 rounded text-lg"
+            >
+              +
+            </button>
+          </div>
+
+          <div
+            style={{
+              transform: `scale(${zoomLevel})`,
+              transformOrigin: "center",
+              width: 600,
+              height: 800,
+            }}
+          >
+            <div className="bg-white shadow rounded">
+              <FabricCanvas width={600} height={800} ref={canvasWrapperRef} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default Home;
