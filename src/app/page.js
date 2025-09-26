@@ -2,11 +2,83 @@
 
 import Sidebar from "@/components/Sidebar";
 import FabricCanvas from "@/components/FabricCanvas";
-import { useRef, useState, useCallback } from "react"; // ✅ useEffect hata diya
+import { useRef, useState, useCallback, useEffect } from "react"; // ✅ useEffect hata diya
 
 const Home = () => {
   const canvasWrapperRef = useRef(null);
-  const [zoomLevel, setZoomLevel] = useState(0.6);
+  const [zoomLevel, setZoomLevel] = useState(0.5);
+
+  const [showOpacitySlider, setShowOpacitySlider] = useState(false);
+  const [imageOpacity, setImageOpacity] = useState(1);
+
+  // Add this effect to track selection
+  useEffect(() => {
+    let interval;
+    const setupSelectionListener = () => {
+      const wrapper = canvasWrapperRef.current;
+      if (!wrapper || !wrapper.canvas) {
+        // Retry after 100ms
+        return;
+      }
+
+      const canvas = wrapper.canvas;
+
+      const checkSelection = () => {
+        const active = canvas.getActiveObject();
+
+        if (active && active.type === "image") {
+          // ✅ Capital "I"
+          setShowOpacitySlider(true);
+          setImageOpacity(active.opacity || 1);
+        } else {
+          setShowOpacitySlider(false);
+        }
+      };
+
+      // Initial check
+      checkSelection();
+
+      // Listen to selection events
+      canvas.on("selection:created", checkSelection);
+      canvas.on("selection:updated", checkSelection);
+      canvas.on("selection:cleared", () => setShowOpacitySlider(false));
+
+      // Clear interval once set up
+      if (interval) clearInterval(interval);
+
+      // Cleanup
+      return () => {
+        canvas.off("selection:created", checkSelection);
+        canvas.off("selection:updated", checkSelection);
+        canvas.off("selection:cleared", () => setShowOpacitySlider(false));
+      };
+    };
+
+    // Try immediately
+    const cleanup = setupSelectionListener();
+
+    if (!cleanup) {
+      // If not ready, retry every 100ms
+      interval = setInterval(() => {
+        const cleanup = setupSelectionListener();
+        if (cleanup) {
+          clearInterval(interval);
+        }
+      }, 100);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (typeof cleanup === "function") cleanup();
+    };
+  }, []);
+
+  // Opacity handler
+  const handleOpacityChange = (value) => {
+    const opacity = parseFloat(value);
+    setImageOpacity(opacity);
+    canvasWrapperRef.current?.setImageOpacity(opacity);
+  };
 
   // === Existing functions: addTextToCanvas, addImageToCanvas, addShapeToCanvas ===
   const addTextToCanvas = () => {
@@ -101,12 +173,32 @@ const Home = () => {
     canvasWrapperRef.current?.setBackgroundColor(color);
   };
 
-  const toggleBold = () =>
-    canvasWrapperRef.current?.toggleTextStyle("fontWeight");
-  const toggleItalic = () =>
-    canvasWrapperRef.current?.toggleTextStyle("fontStyle");
-  const toggleUnderline = () =>
-    canvasWrapperRef.current?.toggleTextStyle("underline");
+  const toggleBold = () => {
+  const wrapper = canvasWrapperRef.current;
+  if (!wrapper) return;
+  const active = wrapper.canvas?.getActiveObject();
+  if (active && active.type === "textbox") {
+    wrapper.toggleTextStyle("fontWeight");
+  }
+};
+
+const toggleItalic = () => {
+  const wrapper = canvasWrapperRef.current;
+  if (!wrapper) return;
+  const active = wrapper.canvas?.getActiveObject();
+  if (active && active.type === "textbox") {
+    wrapper.toggleTextStyle("fontStyle");
+  }
+};
+
+const toggleUnderline = () => {
+  const wrapper = canvasWrapperRef.current;
+  if (!wrapper) return;
+  const active = wrapper.canvas?.getActiveObject();
+  if (active && active.type === "textbox") {
+    wrapper.toggleTextStyle("underline");
+  }
+};
 
   const changeTextColor = (color) => {
     canvasWrapperRef.current?.updateTextStyle({ fill: color });
@@ -245,6 +337,27 @@ const Home = () => {
           />
         </div>
 
+        {showOpacitySlider && (
+          <>
+            <div className="border-l mx-2"></div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs">Opacity:</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={imageOpacity}
+                onChange={(e) => handleOpacityChange(e.target.value)}
+                className="w-20"
+              />
+              <span className="text-xs w-8">
+                {Math.round(imageOpacity * 100)}%
+              </span>
+            </div>
+          </>
+        )}
+
         <div className="border-l mx-2"></div>
         <button
           onClick={downloadPNG}
@@ -283,16 +396,17 @@ const Home = () => {
             </button>
           </div>
 
+          {/* ✅ Scale the entire container */}
           <div
             style={{
               transform: `scale(${zoomLevel})`,
               transformOrigin: "center",
-              width: 600,
+              width: 1200,
               height: 800,
             }}
           >
             <div className="bg-white shadow rounded">
-              <FabricCanvas width={600} height={800} ref={canvasWrapperRef} />
+              <FabricCanvas width={1200} height={800} ref={canvasWrapperRef} />
             </div>
           </div>
         </div>

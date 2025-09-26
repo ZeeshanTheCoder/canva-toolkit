@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, forwardRef } from "react";
 
-const FabricCanvas = forwardRef(({ width = 600, height = 800 }, ref) => {
+const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
   const canvasRef = useRef(null);
   const historyRef = useRef([]); // For undo/redo
   const historyStep = useRef(0);
@@ -15,7 +15,7 @@ const FabricCanvas = forwardRef(({ width = 600, height = 800 }, ref) => {
       if (!fabric || typeof fabric.Canvas !== "function") return;
 
       const canvas = new fabric.Canvas(canvasRef.current, {
-        backgroundColor: "#ffffff",
+        backgroundColor: "#ffffff", // Keep white background
         width: width,
         height: height,
         selection: true,
@@ -108,22 +108,66 @@ const FabricCanvas = forwardRef(({ width = 600, height = 800 }, ref) => {
             };
             img.src = imageUrl;
           },
-          // ✅ Text Styling
+          getActiveObjectType: () => {
+            const active = canvas.getActiveObject();
+            return active ? active.type : null;
+          },
+          getImageOpacity: () => {
+            const active = canvas.getActiveObject();
+            if (active && active.type === "image") {
+              return active.opacity;
+            }
+            return 1;
+          },
+          setImageOpacity: (opacity) => {
+            const active = canvas.getActiveObject();
+            if (active && active.type === "image") {
+              active.set({ opacity: parseFloat(opacity) });
+              canvas.requestRenderAll();
+              saveState();
+            }
+          },
+          toggleTextStyle: (property) => {
+            const active = canvas.getActiveObject();
+            if (active && active.type === "textbox") {
+              const start = active.selectionStart;
+              const end = active.selectionEnd;
+              const styles = active.getSelectionStyles(start, end);
+              const hasStyle = Object.values(styles).some(
+                (s) => s && s[property] !== undefined
+              );
+
+              if (hasStyle) {
+                for (let i = start; i < end; i++) {
+                  active.removeStyle(property, i);
+                }
+              } else {
+                let value;
+                if (property === "fontWeight") value = "bold";
+                else if (property === "fontStyle") value = "italic";
+                else if (property === "underline") value = true;
+                else return;
+
+                active.setSelectionStyles({ [property]: value }, start, end);
+              }
+              canvas.requestRenderAll();
+              saveState();
+            }
+          },
           updateTextStyle: (style) => {
             const active = canvas.getActiveObject();
             if (active && active.type === "textbox") {
+              // ✅ Safe check
               active.set(style);
               canvas.requestRenderAll();
               saveState();
             }
           },
-          // ✅ Change Canvas Background
           setBackgroundColor: (color) => {
             canvas.backgroundColor = color;
             canvas.renderAll();
             saveState();
           },
-          // ✅ Download
           downloadPNG: () => {
             const link = document.createElement("a");
             link.href = canvas.toDataURL({ format: "png" });
@@ -145,13 +189,38 @@ const FabricCanvas = forwardRef(({ width = 600, height = 800 }, ref) => {
   }, [width, height, ref]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className="border border-gray-300"
-      style={{ display: "block" }}
-    />
+    <div
+      className="relative"
+      style={{
+        width: width,
+        height: height,
+      }}
+    >
+      {/* ✅ Purple margins — always on top */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          border: "40px solid #7B68EE",
+          boxSizing: "border-box",
+          zIndex: 10,
+          margin: "10px"
+        }}
+      ></div>
+      {/* ✅ Center vertical line */}
+      <div
+        className="absolute top-0 m-4 bottom-0 left-1/2 transform -translate-x-1/2 w-20 bg-[#7B68EE] pointer-events-none z-10"
+        style={{ zIndex: 10 }}
+      ></div>
+
+      {/* ✅ Canvas — below margins */}
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="border border-gray-300"
+        style={{ display: "block", position: "relative", zIndex: 1 }}
+      />
+    </div>
   );
 });
 
