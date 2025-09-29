@@ -5,6 +5,7 @@ import { useEffect, useRef, forwardRef } from "react";
 
 const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
   const canvasRef = useRef(null);
+  const isUndoRedo = useRef(false);
 
   useEffect(() => {
     import("fabric").then((fabricModule) => {
@@ -26,6 +27,9 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
       let debounceTimer = null;
 
       const saveState = () => {
+        // 🔒 Skip auto-save during undo/redo
+        if (isUndoRedo.current) return;
+
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           if (historyStep < history.length - 1) {
@@ -35,7 +39,6 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
           history.push(json);
           historyStep = history.length - 1;
 
-          // ✅ Save to localStorage
           try {
             localStorage.setItem("canvasState", json);
             localStorage.setItem("canvasHistory", JSON.stringify(history));
@@ -97,24 +100,39 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
       // Undo / Redo
       const undo = () => {
         if (historyStep > 0) {
+          isUndoRedo.current = true; // 🔒 Disable save
           historyStep--;
-          canvas.loadFromJSON(
-            history[historyStep],
-            canvas.renderAll.bind(canvas)
-          );
-          // Update localStorage
-          localStorage.setItem("historyStep", historyStep.toString());
+          canvas.loadFromJSON(history[historyStep], () => {
+            setTimeout(() => {
+              canvas.renderAll();
+              const objects = canvas.getObjects();
+              if (objects.length > 0) {
+                const lastObject = objects[objects.length - 1];
+                canvas.setActiveObject(lastObject);
+              }
+              localStorage.setItem("historyStep", historyStep.toString());
+              isUndoRedo.current = false; // ✅ Re-enable save
+            }, 0);
+          });
         }
       };
 
       const redo = () => {
         if (historyStep < history.length - 1) {
+          isUndoRedo.current = true; // 🔒 Disable save
           historyStep++;
-          canvas.loadFromJSON(
-            history[historyStep],
-            canvas.renderAll.bind(canvas)
-          );
-          localStorage.setItem("historyStep", historyStep.toString());
+          canvas.loadFromJSON(history[historyStep], () => {
+            setTimeout(() => {
+              canvas.renderAll();
+              const objects = canvas.getObjects();
+              if (objects.length > 0) {
+                const lastObject = objects[objects.length - 1];
+                canvas.setActiveObject(lastObject);
+              }
+              localStorage.setItem("historyStep", historyStep.toString());
+              isUndoRedo.current = false; // ✅ Re-enable save
+            }, 0);
+          });
         }
       };
 
