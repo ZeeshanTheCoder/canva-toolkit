@@ -5,8 +5,6 @@ import { useEffect, useRef, forwardRef } from "react";
 
 const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
   const canvasRef = useRef(null);
-  const historyRef = useRef([]); // For undo/redo
-  const historyStep = useRef(0);
 
   useEffect(() => {
     import("fabric").then((fabricModule) => {
@@ -15,14 +13,14 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
       if (!fabric || typeof fabric.Canvas !== "function") return;
 
       const canvas = new fabric.Canvas(canvasRef.current, {
-        backgroundColor: "#ffffff", // Keep white background
+        backgroundColor: "#ffffff",
         width: width,
         height: height,
         selection: true,
         preserveObjectStacking: true,
       });
 
-      // 🔁 Undo/Redo with DEBOUNCE
+      // 🔁 History for undo/redo
       const history = [];
       let historyStep = -1;
       let debounceTimer = null;
@@ -33,19 +31,70 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
           if (historyStep < history.length - 1) {
             history.splice(historyStep + 1);
           }
-          history.push(JSON.stringify(canvas.toJSON()));
+          const json = JSON.stringify(canvas.toJSON());
+          history.push(json);
           historyStep = history.length - 1;
-        }, 300); // Wait 300ms after last change
+
+          // ✅ Save to localStorage
+          try {
+            localStorage.setItem("canvasState", json);
+            localStorage.setItem("canvasHistory", JSON.stringify(history));
+            localStorage.setItem("historyStep", historyStep.toString());
+          } catch (e) {
+            console.warn("localStorage full or not available");
+          }
+        }, 300);
       };
+
+      // 🔄 Load from localStorage on init
+      const loadFromStorage = () => {
+        try {
+          const savedState = localStorage.getItem("canvasState");
+          const savedHistory = localStorage.getItem("canvasHistory");
+          const savedStep = localStorage.getItem("historyStep");
+
+          if (savedState) {
+            canvas.loadFromJSON(savedState, () => {
+              canvas.renderAll();
+
+              // 👇 Delay setActiveObject to ensure objects are fully ready
+              setTimeout(() => {
+                const objects = canvas.getObjects();
+                if (objects.length > 0) {
+                  const lastObject = objects[objects.length - 1];
+                  canvas.setActiveObject(lastObject);
+                  canvas.requestRenderAll(); // Ensure selection box appears
+                }
+
+                // Notify parent AFTER selection is applied
+                if (
+                  ref?.current &&
+                  typeof ref.current.onCanvasReady === "function"
+                ) {
+                  ref.current.onCanvasReady();
+                }
+              }, 0); // Even 0ms delay ensures next tick
+            });
+          }
+
+          if (savedHistory) {
+            history.push(...JSON.parse(savedHistory));
+            historyStep = savedStep ? parseInt(savedStep) : history.length - 1;
+          } else if (savedState) {
+            history.push(savedState);
+            historyStep = 0;
+          }
+        } catch (e) {
+          console.error("Failed to load from localStorage", e);
+        }
+      };
+      loadFromStorage();
 
       canvas.on("object:modified", saveState);
       canvas.on("object:added", saveState);
       canvas.on("object:removed", saveState);
 
-      // Initial state
-      setTimeout(saveState, 100);
-
-      // Undo / Redo functions
+      // Undo / Redo
       const undo = () => {
         if (historyStep > 0) {
           historyStep--;
@@ -53,6 +102,8 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
             history[historyStep],
             canvas.renderAll.bind(canvas)
           );
+          // Update localStorage
+          localStorage.setItem("historyStep", historyStep.toString());
         }
       };
 
@@ -63,15 +114,19 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
             history[historyStep],
             canvas.renderAll.bind(canvas)
           );
+          localStorage.setItem("historyStep", historyStep.toString());
         }
       };
 
-      // 🔥 Delete + Undo/Redo keys
+      // 🔥 Keyboard shortcuts
       const handleKeyDown = (e) => {
         if (e.key === "Delete" || e.key === "Backspace") {
           const active = canvas.getActiveObject();
           if (active?.type === "textbox" && active.isEditing) return;
-          if (active) canvas.remove(active);
+          if (active) {
+            canvas.remove(active);
+            saveState();
+          }
         }
         if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
           e.preventDefault();
@@ -104,7 +159,7 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
               canvas.add(fImg);
               canvas.setActiveObject(fImg);
               canvas.requestRenderAll();
-              saveState(); // 👈 Save after add
+              saveState();
             };
             img.src = imageUrl;
           },
@@ -157,8 +212,65 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
           updateTextStyle: (style) => {
             const active = canvas.getActiveObject();
             if (active && active.type === "textbox") {
-              // ✅ Safe check
-              active.set(style);
+              // If text is selected → apply to selection
+              if (active.selectionStart !== active.selectionEnd) {
+                active.setSelectionStyles(style);
+              } else {
+                // No selection → apply to whole text
+                active.set(style);
+              }
+              canvas.requestRenderAll();
+              saveState();
+            }
+          },
+
+          // Add this new method for color (or reuse updateTextStyle)
+          updateSelectedTextStyle: (style) => {
+            const active = canvas.getActiveObject();
+            if (active && active.type === "textbox") {
+              // Handle opacity specially → convert to rgba fill
+              if (style.opacity !== undefined) {
+                const { opacity } = style;
+                const currentStyles = active.getSelectionStyles(
+                  active.selectionStart,
+                  active.selectionEnd
+                );
+
+                // Get base color: either from selection or global fill
+                let baseColor = "#000000"; // default
+                if (currentStyles.length > 0 && currentStyles[0]?.fill) {
+                  baseColor = currentStyles[0].fill;
+                } else if (active.fill) {
+                  baseColor = active.fill;
+                }
+
+                // Convert to rgba
+                const toRGBA = (color, alpha) => {
+                  if (color.startsWith("rgba"))
+                    return color.replace(/[\d.]+\)$/, `${alpha})`);
+                  const canvas = document.createElement("canvas");
+                  const ctx = canvas.getContext("2d");
+                  ctx.fillStyle = color;
+                  const { r, g, b } = ctx.fillStyle
+                    ? (() => {
+                        ctx.fillRect(0, 0, 1, 1);
+                        const data = ctx.getImageData(0, 0, 1, 1).data;
+                        return { r: data[0], g: data[1], b: data[2] };
+                      })()
+                    : { r: 0, g: 0, b: 0 };
+                  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                };
+
+                const rgbaFill = toRGBA(baseColor, opacity);
+                active.setSelectionStyles({ fill: rgbaFill });
+              } else {
+                // Normal style (color, fontSize, etc.)
+                if (active.selectionStart !== active.selectionEnd) {
+                  active.setSelectionStyles(style);
+                } else {
+                  active.set(style);
+                }
+              }
               canvas.requestRenderAll();
               saveState();
             }
@@ -167,6 +279,22 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
             canvas.backgroundColor = color;
             canvas.renderAll();
             saveState();
+          },
+          updateShapeStyle: (style) => {
+            const active = canvas.getActiveObject();
+            if (
+              active &&
+              (active.type === "rect" ||
+                active.type === "circle" ||
+                active.type === "ellipse" ||
+                active.type === "polygon" ||
+                active.type === "triangle" ||
+                active.type === "line")
+            ) {
+              active.set(style);
+              canvas.requestRenderAll();
+              saveState();
+            }
           },
           downloadPNG: () => {
             const link = document.createElement("a");
@@ -196,23 +324,19 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
         height: height,
       }}
     >
-      {/* ✅ Purple margins — always on top */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           border: "40px solid #7B68EE",
           boxSizing: "border-box",
           zIndex: 10,
-          margin: "10px"
+          margin: "10px",
         }}
       ></div>
-      {/* ✅ Center vertical line */}
       <div
         className="absolute top-0 m-4 bottom-0 left-1/2 transform -translate-x-1/2 w-20 bg-[#7B68EE] pointer-events-none z-10"
         style={{ zIndex: 10 }}
       ></div>
-
-      {/* ✅ Canvas — below margins */}
       <canvas
         ref={canvasRef}
         width={width}

@@ -6,64 +6,82 @@ import { useRef, useState, useCallback, useEffect } from "react"; // ✅ useEffe
 
 const Home = () => {
   const canvasWrapperRef = useRef(null);
+  const canvasLoaded = useRef(false);
   const [zoomLevel, setZoomLevel] = useState(0.5);
-
+  const [showColorPicker, setShowColorPicker] = useState(false);
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
   const [imageOpacity, setImageOpacity] = useState(1);
 
   // Add this effect to track selection
   useEffect(() => {
-    let interval;
     const setupSelectionListener = () => {
       const wrapper = canvasWrapperRef.current;
-      if (!wrapper || !wrapper.canvas) {
-        // Retry after 100ms
-        return;
-      }
+      if (!wrapper || !wrapper.canvas) return;
 
       const canvas = wrapper.canvas;
 
       const checkSelection = () => {
         const active = canvas.getActiveObject();
-
-        if (active && active.type === "image") {
-          // ✅ Capital "I"
+        if (
+          active &&
+          (active.type === "image" ||
+            active.type === "rect" ||
+            active.type === "circle" ||
+            active.type === "ellipse" ||
+            active.type === "triangle" ||
+            active.type === "polygon" ||
+            active.type === "line" ||
+            active.type === "textbox")
+        ) {
           setShowOpacitySlider(true);
+          setShowColorPicker(true);
           setImageOpacity(active.opacity || 1);
         } else {
           setShowOpacitySlider(false);
+          setShowColorPicker(false);
         }
       };
 
-      // Initial check
+      // Attach onCanvasReady to trigger check after load
+      if (canvasWrapperRef.current) {
+        canvasWrapperRef.current.onCanvasReady = () => {
+          // Wait a tick for render + selection state
+          setTimeout(() => {
+            checkSelection(); // ✅ This will show UI if object is auto-selected or exists
+          }, 100);
+        };
+      }
+
+      // Initial check (for dynamically added objects)
       checkSelection();
 
-      // Listen to selection events
+      const handleSelectionCleared = () => {
+        setShowOpacitySlider(false);
+        setShowColorPicker(false);
+      };
+
+      // Event listeners
       canvas.on("selection:created", checkSelection);
       canvas.on("selection:updated", checkSelection);
-      canvas.on("selection:cleared", () => setShowOpacitySlider(false));
-
-      // Clear interval once set up
-      if (interval) clearInterval(interval);
+      canvas.on("selection:cleared", handleSelectionCleared);
 
       // Cleanup
       return () => {
         canvas.off("selection:created", checkSelection);
         canvas.off("selection:updated", checkSelection);
-        canvas.off("selection:cleared", () => setShowOpacitySlider(false));
+        canvas.off("selection:cleared", handleSelectionCleared); // Fixed: was arrow fn before
       };
     };
 
     // Try immediately
     const cleanup = setupSelectionListener();
 
+    // Fallback poll if canvas not ready yet
+    let interval;
     if (!cleanup) {
-      // If not ready, retry every 100ms
       interval = setInterval(() => {
-        const cleanup = setupSelectionListener();
-        if (cleanup) {
-          clearInterval(interval);
-        }
+        const cln = setupSelectionListener();
+        if (cln) clearInterval(interval);
       }, 100);
     }
 
@@ -77,7 +95,22 @@ const Home = () => {
   const handleOpacityChange = (value) => {
     const opacity = parseFloat(value);
     setImageOpacity(opacity);
-    canvasWrapperRef.current?.setImageOpacity(opacity);
+
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+
+    const active = wrapper.canvas?.getActiveObject();
+    if (!active) return;
+
+    if (active.type === "textbox") {
+      // ✅ Apply opacity only to selected text via fill: rgba()
+      wrapper.updateSelectedTextStyle({ opacity });
+    } else {
+      // For shapes/images → use object-level opacity
+      active.set({ opacity });
+      wrapper.canvas.requestRenderAll();
+      wrapper.canvas.fire("object:modified");
+    }
   };
 
   // === Existing functions: addTextToCanvas, addImageToCanvas, addShapeToCanvas ===
@@ -114,36 +147,279 @@ const Home = () => {
     if (!wrapper) return;
     const { canvas, fabric } = wrapper;
     let shape;
+
+    // Common position
+    const left = 100;
+    const top = 100;
+
     switch (type) {
-      case "rect":
+      case "square":
         shape = new fabric.Rect({
-          left: 100,
-          top: 100,
-          fill: "#4A90E2",
+          left,
+          top,
+          fill: "#FF0000",
+          width: 80,
+          height: 80,
+          originX: "center",
+          originY: "center",
+        });
+        break;
+
+      case "rounded-rect":
+        shape = new fabric.Rect({
+          left,
+          top,
+          fill: "#FF0000",
           width: 80,
           height: 60,
+          rx: 15,
+          ry: 15,
+          originX: "center",
+          originY: "center",
         });
         break;
+
       case "circle":
         shape = new fabric.Circle({
-          left: 140,
-          top: 100,
-          fill: "#7ED321",
+          left,
+          top,
+          fill: "#FF0000",
           radius: 40,
+          originX: "center",
+          originY: "center",
         });
         break;
+
+      case "oval":
+        shape = new fabric.Ellipse({
+          left,
+          top,
+          fill: "#FF0000",
+          rx: 40,
+          ry: 20,
+          originX: "center",
+          originY: "center",
+        });
+        break;
+
       case "triangle":
         shape = new fabric.Triangle({
-          left: 100,
-          top: 100,
-          fill: "#D0021B",
+          left,
+          top,
+          fill: "#FF0000",
           width: 80,
-          height: 100,
+          height: 80,
+          originX: "center",
+          originY: "center",
         });
         break;
+
+      case "diamond":
+        shape = new fabric.Polygon(
+          [
+            { x: 0, y: -40 },
+            { x: 40, y: 0 },
+            { x: 0, y: 40 },
+            { x: -40, y: 0 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "star":
+        shape = new fabric.Polygon(
+          [
+            { x: 0, y: -40 },
+            { x: 11, y: -12 },
+            { x: 40, y: -12 },
+            { x: 18, y: 5 },
+            { x: 25, y: 40 },
+            { x: 0, y: 25 },
+            { x: -25, y: 40 },
+            { x: -18, y: 5 },
+            { x: -40, y: -12 },
+            { x: -11, y: -12 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "pentagon":
+        shape = new fabric.Polygon(
+          Array.from({ length: 5 }, (_, i) => {
+            const angle = ((i * 72 - 90) * Math.PI) / 180;
+            return {
+              x: 40 * Math.cos(angle),
+              y: 40 * Math.sin(angle),
+            };
+          }),
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "hexagon":
+        shape = new fabric.Polygon(
+          Array.from({ length: 6 }, (_, i) => {
+            const angle = ((i * 60 - 30) * Math.PI) / 180;
+            return {
+              x: 40 * Math.cos(angle),
+              y: 40 * Math.sin(angle),
+            };
+          }),
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "octagon":
+        shape = new fabric.Polygon(
+          Array.from({ length: 8 }, (_, i) => {
+            const angle = ((i * 45 + 22.5) * Math.PI) / 180;
+            return {
+              x: 40 * Math.cos(angle),
+              y: 40 * Math.sin(angle),
+            };
+          }),
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "shield":
+        shape = new fabric.Polygon(
+          [
+            { x: 0, y: -40 },
+            { x: 25, y: -15 },
+            { x: 15, y: 25 },
+            { x: -15, y: 25 },
+            { x: -25, y: -15 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "badge":
+        shape = new fabric.Polygon(
+          [
+            { x: 0, y: -30 },
+            { x: 20, y: -30 },
+            { x: 20, y: 10 },
+            { x: 0, y: 25 },
+            { x: -20, y: 10 },
+            { x: -20, y: -30 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "ribbon":
+        shape = new fabric.Polygon(
+          [
+            { x: 0, y: -30 },
+            { x: 20, y: -30 },
+            { x: 20, y: 20 },
+            { x: 0, y: 0 },
+            { x: -20, y: 20 },
+            { x: -20, y: -30 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "arrow":
+        shape = new fabric.Polygon(
+          [
+            { x: -30, y: -10 },
+            { x: 10, y: -10 },
+            { x: 10, y: -20 },
+            { x: 30, y: 0 },
+            { x: 10, y: 20 },
+            { x: 10, y: 10 },
+            { x: -30, y: 10 },
+          ],
+          {
+            left,
+            top,
+            fill: "#FF0000",
+            originX: "center",
+            originY: "center",
+          }
+        );
+        break;
+
+      case "line":
+        shape = new fabric.Line([-40, 0, 40, 0], {
+          stroke: "black",
+          strokeWidth: 2,
+          originX: "center",
+          originY: "center",
+          left,
+          top,
+        });
+        break;
+
+      case "dashed-line":
+        shape = new fabric.Line([-40, 0, 40, 0], {
+          stroke: "black",
+          strokeWidth: 2,
+          strokeDashArray: [5, 5],
+          originX: "center",
+          originY: "center",
+          left,
+          top,
+        });
+        break;
+
       default:
         return;
     }
+
     canvas.add(shape);
     canvas.setActiveObject(shape);
   };
@@ -174,34 +450,54 @@ const Home = () => {
   };
 
   const toggleBold = () => {
-  const wrapper = canvasWrapperRef.current;
-  if (!wrapper) return;
-  const active = wrapper.canvas?.getActiveObject();
-  if (active && active.type === "textbox") {
-    wrapper.toggleTextStyle("fontWeight");
-  }
-};
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const active = wrapper.canvas?.getActiveObject();
+    if (active && active.type === "textbox") {
+      wrapper.toggleTextStyle("fontWeight");
+    }
+  };
 
-const toggleItalic = () => {
-  const wrapper = canvasWrapperRef.current;
-  if (!wrapper) return;
-  const active = wrapper.canvas?.getActiveObject();
-  if (active && active.type === "textbox") {
-    wrapper.toggleTextStyle("fontStyle");
-  }
-};
+  const toggleItalic = () => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const active = wrapper.canvas?.getActiveObject();
+    if (active && active.type === "textbox") {
+      wrapper.toggleTextStyle("fontStyle");
+    }
+  };
 
-const toggleUnderline = () => {
-  const wrapper = canvasWrapperRef.current;
-  if (!wrapper) return;
-  const active = wrapper.canvas?.getActiveObject();
-  if (active && active.type === "textbox") {
-    wrapper.toggleTextStyle("underline");
-  }
-};
+  const toggleUnderline = () => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const active = wrapper.canvas?.getActiveObject();
+    if (active && active.type === "textbox") {
+      wrapper.toggleTextStyle("underline");
+    }
+  };
 
-  const changeTextColor = (color) => {
-    canvasWrapperRef.current?.updateTextStyle({ fill: color });
+  const changeFillColor = (color) => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+
+    const active = wrapper.canvas?.getActiveObject();
+    if (!active) return;
+
+    if (active.type === "textbox") {
+      // ✅ Apply only to selected text
+      wrapper.updateSelectedTextStyle({ fill: color });
+    } else if (
+      active.type === "rect" ||
+      active.type === "circle" ||
+      active.type === "ellipse" ||
+      active.type === "triangle" ||
+      active.type === "polygon" ||
+      active.type === "line"
+    ) {
+      active.set({ fill: color });
+      wrapper.canvas.requestRenderAll();
+      wrapper.canvas.fire("object:modified");
+    }
   };
 
   const changeFontSize = (size) => {
@@ -210,12 +506,12 @@ const toggleUnderline = () => {
 
     const active = wrapper.canvas?.getActiveObject();
     if (!active || active.type !== "textbox") {
-      // Optional: show message
       console.warn("Please select a text box to change font size");
       return;
     }
 
-    wrapper.updateTextStyle({ fontSize: parseInt(size) });
+    // ✅ Apply only to selected text
+    wrapper.updateSelectedTextStyle({ fontSize: parseInt(size) });
   };
 
   return (
@@ -281,32 +577,38 @@ const toggleUnderline = () => {
           />
         </div>
 
-        {/* Text Color */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs">Color:</span>
-          <div className="flex gap-1">
-            {[
-              "#000000",
-              "#FF0000",
-              "#00FF00",
-              "#0000FF",
-              "#FFFF00",
-              "#FF00FF",
-            ].map((color) => (
-              <button
-                key={color}
-                onClick={() => changeTextColor(color)}
-                className="w-5 h-5 rounded-full border border-gray-300"
-                style={{ backgroundColor: color }}
+        {/* Fill Color */}
+
+        {(showColorPicker || showOpacitySlider) && (
+          <>
+            <div className="border-l mx-2"></div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs">Color:</span>
+              <div className="flex gap-1">
+                {[
+                  "#000000",
+                  "#FF0000",
+                  "#00FF00",
+                  "#0000FF",
+                  "#FFFF00",
+                  "#FF00FF",
+                ].map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => changeFillColor(color)}
+                    className="w-5 h-5 rounded-full border border-gray-300"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+              <input
+                type="color"
+                onChange={(e) => changeFillColor(e.target.value)}
+                className="w-6 h-6 cursor-pointer rounded-full border border-gray-300"
               />
-            ))}
-          </div>
-          <input
-            type="color"
-            onChange={(e) => changeTextColor(e.target.value)}
-            className="w-6 h-6 cursor-pointer rounded-full border border-gray-300"
-          />
-        </div>
+            </div>
+          </>
+        )}
 
         {/* Background Color (same as before) */}
         <div className="border-l mx-2"></div>
