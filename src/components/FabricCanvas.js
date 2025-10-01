@@ -22,25 +22,48 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
       });
 
       // 🔁 History for undo/redo
-      const history = [];
+      let history = [];
       let historyStep = -1;
       let debounceTimer = null;
 
+      // Load history from localStorage FIRST
+      const loadHistoryFromStorage = () => {
+        try {
+          const savedHistory = localStorage.getItem("canvasHistory");
+          const savedStep = localStorage.getItem("historyStep");
+
+          if (savedHistory) {
+            history = JSON.parse(savedHistory);
+            historyStep = savedStep ? parseInt(savedStep, 10) : history.length - 1;
+            // Clamp step in case of corruption
+            historyStep = Math.max(-1, Math.min(historyStep, history.length - 1));
+          } else {
+            // No history → start fresh
+            history = [];
+            historyStep = -1;
+          }
+        } catch (e) {
+          console.warn("Failed to parse canvas history", e);
+          history = [];
+          historyStep = -1;
+        }
+      };
+
       const saveState = () => {
-        // 🔒 Skip auto-save during undo/redo
         if (isUndoRedo.current) return;
 
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
+          // Trim future history
           if (historyStep < history.length - 1) {
-            history.splice(historyStep + 1);
+            history = history.slice(0, historyStep + 1);
           }
+
           const json = JSON.stringify(canvas.toJSON());
           history.push(json);
           historyStep = history.length - 1;
 
           try {
-            localStorage.setItem("canvasState", json);
             localStorage.setItem("canvasHistory", JSON.stringify(history));
             localStorage.setItem("historyStep", historyStep.toString());
           } catch (e) {
@@ -49,49 +72,45 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
         }, 300);
       };
 
-      // 🔄 Load from localStorage on init
-      const loadFromStorage = () => {
+      // 🔄 Load canvas state AFTER history is ready
+      const loadCanvasFromStorage = () => {
         try {
-          const savedState = localStorage.getItem("canvasState");
-          const savedHistory = localStorage.getItem("canvasHistory");
-          const savedStep = localStorage.getItem("historyStep");
-
-          if (savedState) {
-            canvas.loadFromJSON(savedState, () => {
+          // Use history if available
+          if (history.length > 0 && historyStep >= 0) {
+            const stateToLoad = history[historyStep];
+            canvas.loadFromJSON(stateToLoad, () => {
               canvas.renderAll();
-
-              // 👇 Delay setActiveObject to ensure objects are fully ready
               setTimeout(() => {
                 const objects = canvas.getObjects();
                 if (objects.length > 0) {
                   const lastObject = objects[objects.length - 1];
                   canvas.setActiveObject(lastObject);
-                  canvas.requestRenderAll(); // Ensure selection box appears
+                  canvas.requestRenderAll();
                 }
-
-                // Notify parent AFTER selection is applied
-                if (
-                  ref?.current &&
-                  typeof ref.current.onCanvasReady === "function"
-                ) {
+                if (ref?.current && typeof ref.current.onCanvasReady === "function") {
                   ref.current.onCanvasReady();
                 }
-              }, 0); // Even 0ms delay ensures next tick
+              }, 0);
             });
-          }
-
-          if (savedHistory) {
-            history.push(...JSON.parse(savedHistory));
-            historyStep = savedStep ? parseInt(savedStep) : history.length - 1;
-          } else if (savedState) {
-            history.push(savedState);
-            historyStep = 0;
+          } else {
+            // Fresh canvas
+            canvas.renderAll();
+            if (ref?.current && typeof ref.current.onCanvasReady === "function") {
+              ref.current.onCanvasReady();
+            }
           }
         } catch (e) {
-          console.error("Failed to load from localStorage", e);
+          console.error("Failed to load canvas from history", e);
+          canvas.renderAll();
+          if (ref?.current && typeof ref.current.onCanvasReady === "function") {
+            ref.current.onCanvasReady();
+          }
         }
       };
-      loadFromStorage();
+
+      // 🔁 Initialize
+      loadHistoryFromStorage();
+      loadCanvasFromStorage();
 
       canvas.on("object:modified", saveState);
       canvas.on("object:added", saveState);
@@ -100,7 +119,7 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
       // Undo / Redo
       const undo = () => {
         if (historyStep > 0) {
-          isUndoRedo.current = true; // 🔒 Disable save
+          isUndoRedo.current = true;
           historyStep--;
           canvas.loadFromJSON(history[historyStep], () => {
             setTimeout(() => {
@@ -111,7 +130,7 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
                 canvas.setActiveObject(lastObject);
               }
               localStorage.setItem("historyStep", historyStep.toString());
-              isUndoRedo.current = false; // ✅ Re-enable save
+              isUndoRedo.current = false;
             }, 0);
           });
         }
@@ -119,7 +138,7 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
 
       const redo = () => {
         if (historyStep < history.length - 1) {
-          isUndoRedo.current = true; // 🔒 Disable save
+          isUndoRedo.current = true;
           historyStep++;
           canvas.loadFromJSON(history[historyStep], () => {
             setTimeout(() => {
@@ -130,7 +149,7 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
                 canvas.setActiveObject(lastObject);
               }
               localStorage.setItem("historyStep", historyStep.toString());
-              isUndoRedo.current = false; // ✅ Re-enable save
+              isUndoRedo.current = false;
             }, 0);
           });
         }
@@ -230,23 +249,18 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
           updateTextStyle: (style) => {
             const active = canvas.getActiveObject();
             if (active && active.type === "textbox") {
-              // If text is selected → apply to selection
               if (active.selectionStart !== active.selectionEnd) {
                 active.setSelectionStyles(style);
               } else {
-                // No selection → apply to whole text
                 active.set(style);
               }
               canvas.requestRenderAll();
               saveState();
             }
           },
-
-          // Add this new method for color (or reuse updateTextStyle)
           updateSelectedTextStyle: (style) => {
             const active = canvas.getActiveObject();
             if (active && active.type === "textbox") {
-              // Handle opacity specially → convert to rgba fill
               if (style.opacity !== undefined) {
                 const { opacity } = style;
                 const currentStyles = active.getSelectionStyles(
@@ -254,35 +268,27 @@ const FabricCanvas = forwardRef(({ width = 1200, height = 800 }, ref) => {
                   active.selectionEnd
                 );
 
-                // Get base color: either from selection or global fill
-                let baseColor = "#000000"; // default
+                let baseColor = "#000000";
                 if (currentStyles.length > 0 && currentStyles[0]?.fill) {
                   baseColor = currentStyles[0].fill;
                 } else if (active.fill) {
                   baseColor = active.fill;
                 }
 
-                // Convert to rgba
                 const toRGBA = (color, alpha) => {
                   if (color.startsWith("rgba"))
                     return color.replace(/[\d.]+\)$/, `${alpha})`);
                   const canvas = document.createElement("canvas");
                   const ctx = canvas.getContext("2d");
                   ctx.fillStyle = color;
-                  const { r, g, b } = ctx.fillStyle
-                    ? (() => {
-                        ctx.fillRect(0, 0, 1, 1);
-                        const data = ctx.getImageData(0, 0, 1, 1).data;
-                        return { r: data[0], g: data[1], b: data[2] };
-                      })()
-                    : { r: 0, g: 0, b: 0 };
-                  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                  ctx.fillRect(0, 0, 1, 1);
+                  const data = ctx.getImageData(0, 0, 1, 1).data;
+                  return `rgba(${data[0]}, ${data[1]}, ${data[2]}, ${alpha})`;
                 };
 
                 const rgbaFill = toRGBA(baseColor, opacity);
                 active.setSelectionStyles({ fill: rgbaFill });
               } else {
-                // Normal style (color, fontSize, etc.)
                 if (active.selectionStart !== active.selectionEnd) {
                   active.setSelectionStyles(style);
                 } else {
