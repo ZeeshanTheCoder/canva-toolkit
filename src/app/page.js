@@ -7,7 +7,7 @@ import { useRef, useState, useCallback, useEffect } from "react"; // ✅ useEffe
 const Home = () => {
   const canvasWrapperRef = useRef(null);
   const canvasLoaded = useRef(false);
-  const [zoomLevel, setZoomLevel] = useState(0.5);
+  const [zoomLevel, setZoomLevel] = useState(0.6);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
   const [imageOpacity, setImageOpacity] = useState(1);
@@ -436,7 +436,7 @@ const Home = () => {
   // Zoom
   const zoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.1, 1.5));
   const zoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.1, 0.5));
-  const resetZoom = () => setZoomLevel(1);
+  const resetZoom = () => setZoomLevel(0.6);
 
   const [bgColor, setBgColor] = useState("#ffffff");
 
